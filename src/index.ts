@@ -138,6 +138,9 @@ export {
   batchRequest,
   batchRequestOrThrow,
   DEFAULT_BATCH_CONCURRENCY,
+  EventCursor,
+  decodeEventTopic,
+  MIN_START_LEDGER,
 } from './utils';
 
 
@@ -150,6 +153,7 @@ export type {
   SimulateFn,
   BatchRequestOptions,
   BatchResult,
+  EventCursorOptions,
 } from "./utils";
 
 // Errors

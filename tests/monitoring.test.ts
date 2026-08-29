@@ -363,7 +363,12 @@ describe('MonitoringModule.getSystemMetrics()', () => {
     await expect(monitor.getSystemMetrics('30d')).resolves.toBeDefined();
   });
 
-  it('queries getEvents with base64-encoded XDR symbol topics (not raw strings)', async () => {
+  // fetchPreviousReserves() and fetchPoolSwapActivity() now build their
+  // getEvents requests via the shared EventCursor utility (src/utils/event-cursor.ts)
+  // instead of hand-rolling topic encoding inline. This test exercises that
+  // migration at the same integration boundary (the mocked server.getEvents)
+  // so it holds regardless of which code builds the request.
+  it('queries getEvents (via EventCursor) with base64-encoded XDR symbol topics and the right ledger bounds', async () => {
     const currentLedger = 100_000;
     const currentStart = currentLedger - LEDGERS_PER_DAY;
     const client = createMockClient({
@@ -405,6 +410,14 @@ describe('MonitoringModule.getSystemMetrics()', () => {
     expect(topicFilters).toContain(TOPIC_SWAP);
     expect(topicFilters).not.toContain('sync');
     expect(topicFilters).not.toContain('swap');
+
+    // EventCursor.scan() threads an explicit fromLedger straight through as
+    // startLedger (no anchoring via getLatestLedger -- see event-cursor.ts),
+    // so the previous-window lookback bound must reach the RPC request
+    // unchanged, exactly as the hand-rolled version did.
+    const previousStart = currentLedger - LEDGERS_PER_DAY * 2;
+    const startLedgers = getEvents.mock.calls.map((call) => call[0]?.startLedger);
+    expect(startLedgers).toContain(previousStart);
 
     // Encoded filters must actually resolve historical events (mock rejects raw strings).
     expect(metrics.tvlChange.absolute).toBeGreaterThan(0);

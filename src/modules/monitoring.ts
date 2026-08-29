@@ -8,7 +8,6 @@
  * @module monitoring
  */
 
-import { SorobanRpc, xdr } from '@stellar/stellar-sdk';
 import { CoralSwapClient } from '@/client';
 import {
   MetricConfig,
@@ -25,16 +24,10 @@ import {
 } from '@/types/monitoring';
 import { ValidationError } from '@/errors';
 import { validateAddress } from '@/utils/validation';
+import { EventCursor } from '@/utils/event-cursor';
 
 /** ~1 day of Soroban ledgers (5s/ledger). */
 const LEDGERS_PER_DAY = 17_280;
-
-/**
- * Base64-encoded XDR `ScVal` symbols for Soroban `getEvents` topic filters.
- * Raw strings like `'sync'` / `'swap'` are rejected by real RPC servers.
- */
-const TOPIC_SYNC = xdr.ScVal.scvSymbol('sync').toXDR('base64');
-const TOPIC_SWAP = xdr.ScVal.scvSymbol('swap').toXDR('base64');
 
 /**
  * Optional construction knobs for {@link MonitoringModule}.
@@ -604,24 +597,20 @@ export class MonitoringModule {
     toLedger: number,
   ): Promise<{ reserve0: bigint; reserve1: bigint } | null> {
     try {
-      const request: SorobanRpc.Server.GetEventsRequest = {
-        startLedger: fromLedger,
-        filters: [
-          {
-            type: 'contract',
-            contractIds: [pairAddress],
-            topics: [[TOPIC_SYNC]],
-          },
-        ],
+      const cursor = new EventCursor(this.client.server);
+      const events = await cursor.scan({
+        contractIds: [pairAddress],
+        topics: ['sync'],
+        fromLedger,
+        toLedger,
         limit: 10000,
-      };
-      const response = await this.client.server.getEvents(request);
-      if (!Array.isArray(response?.events) || response.events.length === 0) {
+      });
+      if (events.length === 0) {
         return null;
       }
 
       let best: { ledger: number; reserve0: bigint; reserve1: bigint } | null = null;
-      for (const event of response.events) {
+      for (const event of events) {
         if (event.ledger > toLedger) continue;
         const parsed = parseSyncEvent(event);
         if (!parsed) continue;
@@ -657,19 +646,15 @@ export class MonitoringModule {
     };
 
     try {
-      const request: SorobanRpc.Server.GetEventsRequest = {
-        startLedger: fromLedger,
-        filters: [
-          {
-            type: 'contract',
-            contractIds: [pairAddress],
-            topics: [[TOPIC_SWAP]],
-          },
-        ],
+      const cursor = new EventCursor(this.client.server);
+      const events = await cursor.scan({
+        contractIds: [pairAddress],
+        topics: ['swap'],
+        fromLedger,
+        toLedger,
         limit: 10000,
-      };
-      const response = await this.client.server.getEvents(request);
-      if (!Array.isArray(response?.events) || response.events.length === 0) {
+      });
+      if (events.length === 0) {
         return empty;
       }
 
@@ -679,7 +664,7 @@ export class MonitoringModule {
       const currentUsers = new Set<string>();
       const previousUsers = new Set<string>();
 
-      for (const event of response.events) {
+      for (const event of events) {
         if (event.ledger > toLedger) continue;
         const parsed = parseSwapEvent(event);
         if (!parsed) continue;
